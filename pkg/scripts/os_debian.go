@@ -51,6 +51,11 @@ if sudo grep -q "deb http://apt.kubernetes.io/ kubernetes-xenial main" /etc/apt/
 fi
 {{- end }}
 
+update_pid="$(lsof | grep ' /var/lib/apt/lists/lock' || true)"
+if [ ! -z "$update_pid" ]; then
+	# make sure that no other update process is running in the background
+	lsof -t /var/lib/apt/lists/lock | xargs -r sudo kill
+fi
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install --option "Dpkg::Options::=--force-confold" -y --no-install-recommends \
 	apt-transport-https \
@@ -70,12 +75,26 @@ sudo systemctl enable --now iscsid
 {{- end }}
 
 {{- if .CONFIGURE_REPOSITORIES }}
+successfully_added_k8s_apt_key=false
+
 sudo install -m 0755 -d /etc/apt/keyrings
 
-curl -fsSL https://pkgs.k8s.io/core:/stable:/{{ .KUBERNETES_MAJOR_MINOR }}/deb/Release.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+# Thank to fucking Hetzner :-)
+while [ "$successfully_added_k8s_apt_key" != "true" ]
+do
+	curl -fsSL https://pkgs.k8s.io/core:/stable:/{{ .KUBERNETES_MAJOR_MINOR }}/deb/Release.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+	if [ -f /etc/apt/keyrings/kubernetes-apt-keyring.gpg ]; then
+		successfully_added_k8s_apt_key=true
+	fi
+done
 
 echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ .KUBERNETES_MAJOR_MINOR }}/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
+update_pid="$(lsof | grep ' /var/lib/apt/lists/lock' || true)"
+if [ ! -z "$update_pid" ]; then
+	# make sure that no other update process is running in the background
+	lsof -t /var/lib/apt/lists/lock | xargs -r sudo kill
+fi
 sudo apt-get update
 {{- end }}
 
