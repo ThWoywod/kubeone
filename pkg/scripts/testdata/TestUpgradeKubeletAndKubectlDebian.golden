@@ -49,7 +49,12 @@ Acquire::https::Proxy "http://https.proxy";
 Acquire::http::Proxy "http://http.proxy";
 EOF
 
-sudo apt-get update
+update_pid="$(lsof | grep ' /var/lib/apt/lists/lock' || true)"
+if [ ! -z "$update_pid" ]; then
+	# make sure that no other update process is running in the background
+	lsof -t /var/lib/apt/lists/lock | xargs -r sudo kill
+fi
+sudo apt-get -oDebug::pkgAcquire::Worker=1 update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install --option "Dpkg::Options::=--force-confold" -y --no-install-recommends \
 	apt-transport-https \
 	ca-certificates \
@@ -57,13 +62,27 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install --option "Dpkg::Options::=--
 	gnupg \
 	lsb-release \
 	rsync
+successfully_added_k8s_apt_key=false
+
 sudo install -m 0755 -d /etc/apt/keyrings
 
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.26/deb/Release.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+# Thank to fucking Hetzner :-)
+while [ "$successfully_added_k8s_apt_key" != "true" ]
+do
+	curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.26/deb/Release.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+	if [ -f /etc/apt/keyrings/kubernetes-apt-keyring.gpg ]; then
+		successfully_added_k8s_apt_key=true
+	fi
+done
 
 echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.26/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
-sudo apt-get update
+update_pid="$(lsof | grep ' /var/lib/apt/lists/lock' || true)"
+if [ ! -z "$update_pid" ]; then
+	# make sure that no other update process is running in the background
+	lsof -t /var/lib/apt/lists/lock | xargs -r sudo kill
+fi
+sudo apt-get -oDebug::pkgAcquire::Worker=1 update
 
 kube_ver="1.26.0-*"
 cni_ver="1.2.0-*"
@@ -79,7 +98,7 @@ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o 
 # Therefore, we use bionic repo which has all Docker versions.
 echo "deb [signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu bionic stable" |
 	sudo tee /etc/apt/sources.list.d/docker.list
-sudo apt-get update
+sudo apt-get -oDebug::pkgAcquire::Worker=1 update
 
 
 sudo apt-mark unhold docker-ce docker-ce-cli containerd.io || true
